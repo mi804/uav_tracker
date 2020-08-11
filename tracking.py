@@ -1,5 +1,3 @@
-
-
 """
   author: Sierkinhane
   since: 2019-2-17 15:03:22
@@ -8,7 +6,6 @@
 import cv2
 import numpy as np
 import time
-
 
 from torchvision import transforms
 import cv2
@@ -26,9 +23,8 @@ from face_models import Resnet50FaceModel, Resnet18FaceModel
 class Tracker(object):
     def __init__(self):
 
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-
-
+        self.device = torch.device(
+            'cuda:0' if torch.cuda.is_available() else 'cpu')
         """
         human&face detection
         """
@@ -40,7 +36,6 @@ class Tracker(object):
         self.nmsThres = 0.45
         self.dataConfig = parse_data_config(self.dataConfigPath)
         self.classes = load_classes(self.dataConfig['names'])
-
         """
         indentification
         """
@@ -54,7 +49,6 @@ class Tracker(object):
         self.bufferPointer = 0
         self.counter = 0
         self.way2 = True
-
 
     def getCenterModel(self):
 
@@ -88,14 +82,20 @@ class Tracker(object):
         if resize:
             # print(img.shape)
             h, w = img.shape[:2]
-            img = cv2.resize(img, (0,0), fx=self.infer_shape[0]/w, fy=self.infer_shape[1]/h, interpolation=cv2.INTER_CUBIC)
+            img = cv2.resize(img, (0, 0),
+                             fx=self.infer_shape[0] / w,
+                             fy=self.infer_shape[1] / h,
+                             interpolation=cv2.INTER_CUBIC)
 
         return img.astype(np.float32) / 255.
 
     def resizeRequested(self, img, height=96, width=96):
 
         height_, width_ = img.shape[:2]
-        return cv2.resize(img, (0,0), fx=width/width_, fy=height/height_, interpolation=cv2.INTER_CUBIC)
+        return cv2.resize(img, (0, 0),
+                          fx=width / width_,
+                          fy=height / height_,
+                          interpolation=cv2.INTER_CUBIC)
 
     def iou_fillter(self):
         """Compute IoU between detect box and gt boxes
@@ -115,7 +115,8 @@ class Tracker(object):
             return
         # print(boxes)
         box_area = (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
-        area = (boxes[:, 2] - boxes[:, 0] + 1) * (boxes[:, 3] - boxes[:, 1] + 1)
+        area = (boxes[:, 2] - boxes[:, 0] + 1) * (boxes[:, 3] - boxes[:, 1] +
+                                                  1)
 
         # abtain the offset of the interception of union between crop_box and gt_box
         xx1 = np.maximum(box[0], boxes[:, 0])
@@ -162,7 +163,8 @@ class Tracker(object):
             query_img = cv2.imread(query)
             query_img = self.normalization(query_img, resize=True)
 
-            query_img = torch.from_numpy(query_img.transpose(2, 0, 1)).unsqueeze(0)
+            query_img = torch.from_numpy(query_img.transpose(2, 0,
+                                                             1)).unsqueeze(0)
             query_img = query_img.to(self.device)
             _, embeddings = model(query_img)
             embeddings = embeddings.cpu().detach().numpy()
@@ -190,16 +192,21 @@ class Tracker(object):
                 _, embeddings = model(imgs)
                 # toc = time.time()
                 # print(toc-tic)
-                embeddings = embeddings.cpu().detach().numpy() # (3, 512)
+                embeddings = embeddings.cpu().detach().numpy()  # (3, 512)
 
-                distance = np.zeros((1, len(self.suspected_bbx))) # (1, 3) 3--bbox 10--vector buffer
+                distance = np.zeros((1, len(
+                    self.suspected_bbx)))  # (1, 3) 3--bbox 10--vector buffer
                 if self.bufferPointer < 19:
                     for i in range(self.bufferPointer):
-                        distance += np.sum((embeddings - np.expand_dims(self.target_vector_buffer[i, :], axis=0))**2, axis=1)
+                        distance += np.sum((embeddings - np.expand_dims(
+                            self.target_vector_buffer[i, :], axis=0))**2,
+                                           axis=1)
                     distance /= self.bufferPointer
                 else:
                     for i in range(self.bufferSize):
-                        distance += np.sum((embeddings - np.expand_dims(self.target_vector_buffer[i, :], axis=0))**2, axis=1)
+                        distance += np.sum((embeddings - np.expand_dims(
+                            self.target_vector_buffer[i, :], axis=0))**2,
+                                           axis=1)
                     distance /= self.bufferSize
 
                 # distance = np.squeeze(distance)
@@ -214,7 +221,8 @@ class Tracker(object):
                         if self.bufferPointer > 9:
                             self.bufferPointer = 0
 
-                        self.target_vector_buffer[self.bufferPointer, :] = embeddings[index, :]
+                        self.target_vector_buffer[
+                            self.bufferPointer, :] = embeddings[index, :]
                         self.bufferPointer += 1
 
                         x1, y1, x2, y2 = self.suspected_bbx[index]
@@ -223,13 +231,17 @@ class Tracker(object):
                         # print(self.suspected_bbx[index])
                         self.target_bbx = self.suspected_bbx[index]
                         label = 'Target %f' % distance[0][index]
-                        plot_one_box([x1, y1, x2, y2], canvas, label=label, color=(0, 255, 170))
+                        plot_one_box([x1, y1, x2, y2],
+                                     canvas,
+                                     label=label,
+                                     color=(0, 255, 170))
                         self.way2 = False
                 else:
                     if distance[0][index] < 0.4:
                         if self.bufferPointer > 9:
                             self.bufferPointer = 0
-                        self.target_vector_buffer[self.bufferPointer, :] = embeddings[index, :]
+                        self.target_vector_buffer[
+                            self.bufferPointer, :] = embeddings[index, :]
                         self.bufferPointer += 1
 
                         x1, y1, x2, y2 = self.suspected_bbx[index]
@@ -237,15 +249,20 @@ class Tracker(object):
                         # print(self.target_bbx)
                         # print(self.suspected_bbx[index])
                         self.target_bbx = self.suspected_bbx[index]
-                        label = 'Target %f'%distance[0][index]
-                        plot_one_box([x1, y1, x2, y2], canvas, label=label, color=(0, 255, 170))
+                        label = 'Target %f' % distance[0][index]
+                        plot_one_box([x1, y1, x2, y2],
+                                     canvas,
+                                     label=label,
+                                     color=(0, 255, 170))
 
         return canvas
 
     def humanFaceDetector(self, img, canvas, model):
 
         ori = img
-        img, _, _, _ = resize_square(img, height=self.boxSize, color=(127.5, 127.5, 127.5))
+        img, _, _, _ = resize_square(img,
+                                     height=self.boxSize,
+                                     color=(127.5, 127.5, 127.5))
         img = img[:, :, ::-1].transpose(2, 0, 1)
         img = np.ascontiguousarray(img, dtype=np.float32)
         img = self.normalization(img)
@@ -257,7 +274,8 @@ class Tracker(object):
             pred = pred[pred[:, :, 4] > self.confThres]
 
             if len(pred) > 0:
-                detections = non_max_suppression(pred.unsqueeze(0), self.confThres, self.nmsThres)
+                detections = non_max_suppression(pred.unsqueeze(0),
+                                                 self.confThres, self.nmsThres)
                 img_detections.extend(detections)
             else:
                 detections = np.array([])
@@ -265,8 +283,10 @@ class Tracker(object):
         if len(detections) != 0:
 
             # The amount of padding that was added
-            pad_x = max(ori.shape[0] - ori.shape[1], 0) * (self.boxSize / max(ori.shape))
-            pad_y = max(ori.shape[1] - ori.shape[0], 0) * (self.boxSize / max(ori.shape))
+            pad_x = max(ori.shape[0] - ori.shape[1],
+                        0) * (self.boxSize / max(ori.shape))
+            pad_y = max(ori.shape[1] - ori.shape[0],
+                        0) * (self.boxSize / max(ori.shape))
             # Image height and width after padding is removed
             unpad_h = self.boxSize - pad_y
             unpad_w = self.boxSize - pad_x
@@ -276,8 +296,10 @@ class Tracker(object):
                 # Rescale coordinates to original dimensions
                 box_h = ((y2 - y1) / unpad_h) * ori.shape[0]
                 box_w = ((x2 - x1) / unpad_w) * ori.shape[1]
-                y1 = (((y1 - pad_y // 2) / unpad_h) * ori.shape[0]).round().item()
-                x1 = (((x1 - pad_x // 2) / unpad_w) * ori.shape[1]).round().item()
+                y1 = (((y1 - pad_y // 2) / unpad_h) *
+                      ori.shape[0]).round().item()
+                x1 = (((x1 - pad_x // 2) / unpad_w) *
+                      ori.shape[1]).round().item()
                 x2 = (x1 + box_w).round().item()
                 y2 = (y1 + box_h).round().item()
                 x1, y1, x2, y2 = max(x1, 0), max(y1, 0), max(x2, 0), max(y2, 0)
@@ -291,14 +313,14 @@ class Tracker(object):
                 # else:
                 #     plot_one_box([x1, y1, x2, y2], canvas, label=label, color=color[int(cls_pred)])
 
-
         return canvas
+
 
 if __name__ == "__main__":
 
     frame_rate_ratio = 1
-    input_video = "videos/joketv.mp4"
-    query = "videos/q1.png"
+    input_video = "videos/video1.mp4"
+    query = "videos/v1q.png"
     output_video = "videos/outputs/" + input_video.split('/')[-1]
 
     tracker = Tracker()
@@ -313,11 +335,13 @@ if __name__ == "__main__":
     output_fps = input_fps / 1
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_video, fourcc, output_fps, (frame.shape[1], frame.shape[0]))
-
+    out = cv2.VideoWriter(output_video, fourcc, output_fps,
+                          (frame.shape[1], frame.shape[0]))
+    cv2.namedWindow("out", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("out", 800, 600)
     i = 0
-    while(cap.isOpened()) and ret_val == True and i < ending_frame:
-        if i% frame_rate_ratio == 0:
+    while (cap.isOpened()) and ret_val == True and i < ending_frame:
+        if i % frame_rate_ratio == 0:
 
             tic = time.time()
             canvas = frame
@@ -325,8 +349,10 @@ if __name__ == "__main__":
             canvas = tracker.indentification(frame, canvas, model_c)
             tracker.suspected_bbx = []  # clear the cache of human
             toc = time.time()
-            cv2.putText(canvas, "FPS:%f" %(1. / (toc-tic)), (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            cv2.putText(canvas, "FPS:%f" % (1. / (toc - tic)), (10, 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             out.write(canvas)
+            cv2.imshow('out', canvas)
+            cv2.waitKey(1)
         ret_val, frame = cap.read()
-        i+=1
-
+        i += 1

@@ -1,14 +1,11 @@
 ## This repository was based on: 
 * yolov3 https://github.com/ultralytics/yolov3
 * center-loss https://github.com/louis-she/center-loss.pytorch
+* human-tracker https://github.com/Sierkinhane/human_tracker.git
 
-## performance
-* https://www.bilibili.com/video/av44360925
+## uav demo
 
-## demo 
-* download yolov3 and centerloss weights. https://pan.baidu.com/s/1ECT_CA8UlgsMlzvBcVwr2w pw:om7k 
-* python tracking.py the output will be stored in videos/output
+```shell
+python uav_tracker.py
+```
 
-## train center loss
-* firstly download the training data https://pan.baidu.com/s/1ECT_CA8UlgsMlzvBcVwr2w pw:om7k into train_data/
-* then python main.py
