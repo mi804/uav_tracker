@@ -3,33 +3,29 @@
   since: 2019-2-17 15:03:22
   description: integerate pose estimation, face&human detection and indentity identification.
 """
-import cv2
-import numpy as np
-import time
-import argparse
 
-from torchvision import transforms
-import cv2
-import math
+import argparse
+import os
 import time
-import torch
+
+import cv2
+
 import numpy as np
+
+import torch
+
 from utils.utils import *
 from utils.datasets import *
 from yolo_models import *
 from face_models import Resnet50FaceModel, Resnet18FaceModel
+
+from tools.commute import send_msg, init_commu
 
 
 # tracker
 class Tracker(object):
     def __init__(self, args):
         self.args = args
-        self.frame_rate_ratio = args.frame_interval
-        self.input_video = args.VIDEO_PATH
-        self.output_video = args.save_path + self.input_video.split('/')[-1]
-
-        # self.query = "videos/q1.png"
-        self.cap = cv2.VideoCapture(self.input_video)
 
         self.device = torch.device(
             'cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -57,9 +53,79 @@ class Tracker(object):
         self.bufferPointer = 0
         self.counter = 0
         self.way2 = True
+        """ other params"""
         self.model_d = self.getHFDModel()
         self.model_c = self.getCenterModel()
         self.initialize = True
+        self.video_init()
+        self.tcp_init()
+        self.clear_target()
+
+    def update_target(self, bbox, shape):
+        self.cur_target = (bbox, shape)
+        self.have_target = True
+
+    def clear_target(self):
+        self.have_target = False
+
+    def check_target(self):
+        if self.have_target:
+            return True
+        return False
+
+    def send_target(self):
+        if self.check_target():
+            width = self.cur_target[1][1]
+            height = self.cur_target[1][0]
+            send_msg(self.sock, True, self.cur_target[0], (width, height))
+        else:
+            send_msg(self.sock, False, [0, 0, 0, 0], (0, 0))
+
+    def tcp_init(self):
+        if self.args.tcp_enable:
+            self.sock = init_commu(self.args.host_ip, self.args.port)
+
+    def video_init(self):
+        self.frame_rate_ratio = args.frame_interval
+        self.video_path = args.video_path
+        if self.args.cam != -1:
+            print("Using webcam " + str(self.args.cam))
+            self.cap = cv2.VideoCapture(self.args.cam)
+        else:
+            self.cap = cv2.VideoCapture(self.video_path)
+
+        if self.args.cam != -1:
+            ret, frame = self.cap.read()
+            assert ret, "Error: Camera error"
+            self.im_width = frame.shape[1]
+            self.im_height = frame.shape[0]
+
+        else:
+            assert os.path.isfile(self.video_path), "Path error"
+            self.cap.open(self.video_path)
+            self.im_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.im_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            assert self.cap.isOpened()
+        if self.args.save_path:
+            os.makedirs(self.args.save_path, exist_ok=True)
+
+            # path of saved video and results
+            self.save_result_path = os.path.join(self.args.save_path,
+                                                 "results.avi")
+            # create video writer
+            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+            self.result_writer = cv2.VideoWriter(
+                self.save_result_path, fourcc, 20,
+                (self.im_width, self.im_height))
+
+            if self.args.save_origin:
+                self.save_source_path = os.path.join(self.args.save_path,
+                                                     "source_video.avi")
+                self.source_writer = cv2.VideoWriter(
+                    self.save_source_path, fourcc, 20,
+                    (self.im_width, self.im_height))
+
+            print("Save results to {}".format(self.args.save_path))
 
     def getCenterModel(self):
 
@@ -221,7 +287,7 @@ class Tracker(object):
                     distance /= self.bufferSize
 
                 # distance = np.squeeze(distance)
-                print(distance)
+                # print(distance)
 
                 # 1. 设定阈值 < 0.4
                 # index = np.where(distance < 0.4)
@@ -247,6 +313,7 @@ class Tracker(object):
                                      label=label,
                                      color=(0, 255, 170))
                         self.way2 = False
+                        self.update_target([x1, y1, x2, y2], canvas.shape)
                 else:
                     if distance[0][index] < 0.4:
                         if self.bufferPointer > 9:
@@ -265,6 +332,7 @@ class Tracker(object):
                                      canvas,
                                      label=label,
                                      color=(0, 255, 170))
+                        self.update_target([x1, y1, x2, y2], canvas.shape)
 
         return canvas
 
@@ -325,9 +393,11 @@ class Tracker(object):
                                          instance.shape[1], instance.shape[0])
                         cv2.imshow('detected instance', instance)
                         cv2.waitKey(1)
+                        skip = False
                         while True:
                             ipt = input(
-                                'is this the target(y for yes and n for no):')
+                                'is this the target(y for yes and n for no and s for skip frame):'
+                            )
                             if ipt == 'y':
                                 self.query_img = instance
                                 print('target saved!')
@@ -336,8 +406,16 @@ class Tracker(object):
                             elif ipt == 'n':
                                 print('go on initialization!')
                                 break
+                            elif ipt == 's':
+                                print(
+                                    'skip this frame and go on initialization!'
+                                )
+                                skip = True
+                                break
                             else:
                                 print('unknown format!')
+                        if skip:
+                            break
                     else:
                         plot_one_box([x1, y1, x2, y2],
                                      ori,
@@ -347,17 +425,15 @@ class Tracker(object):
         return ori
 
     def tracker_init(self):
-        cap = self.cap
-        video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        ending_frame = video_length
-        ret_val, frame = cap.read()
-
-        i = 0
         cv2.namedWindow("tracker init", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("tracker init", args.display_width,
                          args.display_height)
-        while (cap.isOpened()) and ret_val is True and i < ending_frame:
-            if i % self.frame_rate_ratio == 0:
+        idx_frame = 0
+        cap = self.cap
+        while cap.grab():
+            idx_frame += 1
+            if idx_frame % self.frame_rate_ratio == 0:
+                _, frame = cap.retrieve()
                 cv2.imshow("tracker init", frame)
                 cv2.waitKey(1)
                 self.humanDetector(frame, self.model_d)
@@ -365,54 +441,57 @@ class Tracker(object):
                 print('initialization done!')
                 break
 
-            ret_val, frame = cap.read()
-            i += 1
         cv2.destroyWindow("tracker init")
 
     def run(self):
         cap = self.cap
-        input_fps = cap.get(cv2.CAP_PROP_FPS)
-        video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        ending_frame = video_length
-        output_fps = input_fps / 1
-        ret_val, frame = cap.read()
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(self.output_video, fourcc, output_fps,
-                              (frame.shape[1], frame.shape[0]))
-        i = 0
+        idx_frame = 0
         cv2.namedWindow("tracking", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("tracking", self.args.display_width,
                          self.args.display_height)
-        while (cap.isOpened()) and ret_val is True and i < ending_frame:
-            if i % self.frame_rate_ratio == 0:
-
+        while cap.grab():
+            idx_frame += 1
+            if idx_frame % self.frame_rate_ratio == 0:
+                _, frame = cap.retrieve()
+                if self.args.save_origin:
+                    self.source_writer.write(frame)
                 tic = time.time()
                 canvas = frame
                 canvas = self.humanDetector(frame, self.model_d)
+                self.clear_target()
                 canvas = self.indentification(frame, canvas, self.model_c)
+                if self.args.tcp_enable:
+                    self.send_target()
                 self.suspected_bbx = []  # clear the cache of human
                 toc = time.time()
                 cv2.putText(canvas, "FPS:%f" % (1. / (toc - tic)), (10, 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                out.write(canvas)
+                self.result_writer.write(canvas)
                 cv2.imshow('tracking', canvas)
                 cv2.waitKey(1)
-            ret_val, frame = cap.read()
-            i += 1
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--VIDEO_PATH", type=str, default="videos/video1.mp4")
+    parser.add_argument("--video_path",
+                        type=str,
+                        default="workdirs/samples/cam1_uav1.mp4")
     parser.add_argument("--frame_interval", type=int, default=1)
     parser.add_argument("--display_width", type=int, default=800)
     parser.add_argument("--display_height", type=int, default=600)
-    parser.add_argument("--save_path", type=str, default="./videos/outputs/")
+    parser.add_argument("--save_path",
+                        type=str,
+                        default="./workdirs/outputs/test")
+    parser.add_argument("--save_origin", action="store_true")
     parser.add_argument("--camera",
                         action="store",
                         dest="cam",
                         type=int,
                         default="-1")
+
+    parser.add_argument("--tcp_enable", action="store_true")
+    parser.add_argument("--host_ip", type=str, default='192.168.43.217')
+    parser.add_argument("--port", type=int, default=9999)
     return parser.parse_args()
 
 
