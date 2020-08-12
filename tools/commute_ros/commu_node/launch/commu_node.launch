@@ -1,0 +1,5 @@
+<launch>
+	<node pkg="commu_node" type="commu_node.py" name="commu_node" output="screen">
+    	<rosparam file="$(find commu_node)/config/wifi_param.yaml" command="load" />
+	</node>
+</launch>
